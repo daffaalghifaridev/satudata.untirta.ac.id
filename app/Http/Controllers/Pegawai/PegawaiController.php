@@ -1,0 +1,740 @@
+<?php
+
+namespace App\Http\Controllers\Pegawai;
+
+use App\Http\Controllers\Controller;
+use App\Services\DTO\ApiResponse;
+use App\Services\Integrations\SimpegPegawaiService;
+use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
+use Illuminate\Pagination\LengthAwarePaginator;
+use Illuminate\Support\Facades\Http;
+use Illuminate\View\View;
+
+class PegawaiController extends Controller
+{
+    public function __construct(public SimpegPegawaiService $pegawaiService)
+    {
+    }
+
+    /**
+     * Nilai id filter yang diterima API SIMPEG, sumbernya config/pegawai.php.
+     */
+    private function statusKerjaIds(): array
+    {
+        return config('pegawai.filter.status_kerja', []);
+    }
+
+    private function statusPegawaiIds(): array
+    {
+        return config('pegawai.filter.status_pegawai', []);
+    }
+
+    private function levelPegawaiIds(): array
+    {
+        return config('pegawai.filter.level_pegawai', []);
+    }
+
+    private function jabatanIds(): array
+    {
+        return config('pegawai.filter.jabatan', []);
+    }
+
+    public function index(Request $request): View
+    {
+        $summaries = \Illuminate\Support\Facades\DB::table('pegawai_summaries')->get();
+        $allPegawai = $summaries->map(fn ($row) => [
+            'nama_stspeg' => $row->status_pegawai, 'nama_stspegawai' => $row->status_kerja,
+            'nama_level_pegawai' => $row->level_pegawai, 'nama_jabatan' => $row->jabatan,
+            'jumlah' => (int) $row->jumlah,
+        ]);
+
+        $statusPegawai = $this->buildStatusCards($allPegawai);
+        $datas = $this->buildWorkStatusCards($allPegawai);
+        $levelPegawai = $this->buildLevelCards($allPegawai);
+
+        $guruBesar = $summaries->isEmpty() ? null : (int) $summaries->sum('guru_besar');
+        $countsLevel = $allPegawai->groupBy(fn ($p) => trim($p['nama_level_pegawai'] ?? ''))->map(fn ($group) => $group->sum('jumlah'));
+
+        $daftarStatistik = [
+            [
+                'title' => 'Pegawai Aktif',
+                'value' => $summaries->isEmpty() ? null : $summaries->filter(fn ($row) => strcasecmp((string) $row->status_pegawai, 'Aktif') === 0)->sum('jumlah'),
+                'href' => null,
+                'iconClass' => 'fa-solid fa-users text-indigo-600',
+                'badgeText' => 'Total SDM',
+                'badgeColor' => 'bg-indigo-600',
+                'footerText' => 'Seluruh Pegawai UNTIRTA',
+            ],
+            [
+                'title' => 'Guru Besar / Profesor',
+                'value' => $guruBesar,
+                'href' => null,
+                'iconClass' => 'fa-solid fa-award text-amber-500',
+                'badgeText' => 'Akademik',
+                'badgeColor' => 'bg-amber-500',
+                'footerText' => 'Fakultas & Pascasarjana',
+            ],
+            [
+                'title' => 'Dosen (Tenaga Pengajar)',
+                'value' => $summaries->isEmpty() ? null : $this->hitungKelompokLevel($countsLevel, 'dosen'),
+                'href' => null,
+                'iconClass' => 'fa-solid fa-chalkboard-user text-blue-600',
+                'badgeText' => 'Tenaga Pengajar',
+                'badgeColor' => 'bg-blue-600',
+                'footerText' => 'Dosen PNS, PPPK & DT',
+            ],
+            [
+                'title' => 'Tenaga Kependidikan',
+                'value' => $summaries->isEmpty() ? null : $this->hitungKelompokLevel($countsLevel, 'tendik'),
+                'href' => null,
+                'iconClass' => 'fa-solid fa-users-gear text-emerald-600',
+                'badgeText' => 'Tendik',
+                'badgeColor' => 'bg-emerald-600',
+                'footerText' => 'Staf & Layanan Kampus',
+            ],
+        ];
+
+        // Siapkan data untuk 3 chart
+        $chartStatusPegawai = $this->buildChartData($statusPegawai);
+        $chartStatusKerja = $this->buildChartData($datas);
+        $chartLevelPegawai = $this->buildChartData($levelPegawai);
+
+        return view('Pegawai.pegawai', compact(
+            'daftarStatistik',
+            'statusPegawai',
+            'datas',
+            'levelPegawai',
+            'guruBesar',
+            'chartStatusPegawai',
+            'chartStatusKerja',
+            'chartLevelPegawai'
+        ));
+    }
+
+    /**
+     * Build data untuk chart dari array cards
+     */
+    private function buildChartData(array $cards): array
+    {
+        $labels = [];
+        $data = [];
+        $total = 0;
+
+        foreach ($cards as $card) {
+            $label = $card['label'] ?? '-';
+            $value = (int) ($card['value'] ?? 0);
+
+            if ($value > 0) {
+                $labels[] = $label;
+                $data[] = $value;
+                $total += $value;
+            }
+        }
+
+        // Fallback if all values are 0
+        if (empty($data) && !empty($cards)) {
+            foreach ($cards as $card) {
+                $labels[] = $card['label'] ?? '-';
+                $data[] = (int) ($card['value'] ?? 0);
+                $total += (int) ($card['value'] ?? 0);
+            }
+        }
+
+        return [
+            'labels' => $labels,
+            'data' => $data,
+            'total' => $total,
+        ];
+    }
+
+
+    private function buildStatusCards($allPegawai): array
+    {
+        $counts = $allPegawai->groupBy(function ($p) {
+            $sp = trim($p['nama_stspeg'] ?? $p['statusPegawai'] ?? '');
+            if (!empty($sp) && $sp !== 'Aktif') {
+                return $sp;
+            }
+            return trim($p['nama_stspegawai'] ?? $p['statusKerja'] ?? 'Tidak Diketahui');
+        })->map(fn ($group) => $group->sum('jumlah'));
+
+        $cards = [];
+        foreach ($counts as $label => $count) {
+            $cards[] = $this->makeStatCard($label, $count);
+        }
+
+        return $cards;
+    }
+
+
+    /**
+     * Jumlah pegawai untuk satu kelompok level, definisinya di config/pegawai.php.
+     */
+    private function hitungKelompokLevel($countsLevel, string $kunci): int
+    {
+        $total = 0;
+
+        foreach (config("pegawai.kelompok_level.{$kunci}", []) as $namaLevel) {
+            $total += (int) $countsLevel->get($namaLevel, 0);
+        }
+
+        return $total;
+    }
+
+    private function buildWorkStatusCards($allPegawai): array
+    {
+        $counts = $allPegawai
+            ->groupBy(fn($p) => trim($p['nama_stspegawai'] ?? $p['statusKerja'] ?? 'Tidak Diketahui'))
+            ->map(fn ($group) => $group->sum('jumlah'))
+            ->sortDesc();
+
+        // Kartu dibentuk dari status kerja yang benar-benar ada pada data API,
+        // bukan dari daftar status tetap di kode.
+        $cards = [];
+        foreach ($counts as $label => $count) {
+            if (empty($label)) {
+                continue;
+            }
+
+            $cards[] = $this->makeWorkStatusCard($label, $count);
+        }
+
+        return $cards;
+    }
+
+    private function buildLevelCards($allPegawai): array
+    {
+        $counts = $allPegawai
+            ->groupBy(fn($p) => trim($p['nama_level_pegawai'] ?? $p['levelPegawai'] ?? 'Tidak Diketahui'))
+            ->map(fn ($group) => $group->sum('jumlah'))
+            ->sortDesc();
+
+        // Kartu level mengikuti level yang dikirim API, tanpa penggabungan tetap.
+        $cards = [];
+        foreach ($counts as $label => $count) {
+            if (empty($label)) {
+                continue;
+            }
+
+            $cards[] = $this->makeLevelCard($label, $count);
+        }
+
+        return $cards;
+    }
+
+
+    private function makeStatCard(string $title, int $value): array
+    {
+        $style = $this->styleStatusPegawai($title);
+
+        return [
+            'label' => $title,
+            'value' => $value,
+            'span' => $style['span'],
+            'bg' => $style['bg'],
+            'icon' => $style['icon'],
+            'text' => $style['text'],
+            'iconBg' => $style['iconBg'],
+            'iconColor' => $style['iconColor'],
+        ];
+    }
+
+    private function makeWorkStatusCard(string $title, int $value): array
+    {
+        return [
+            'label' => $title,
+            'value' => $value,
+            'bg' => 'bg-[#4F46E5]',
+            'iconBg' => 'bg-white',
+            'iconColor' => 'text-indigo-700',
+            'icon' => match ($title) {
+                'CPNS' => 'fa-solid fa-user-clock',
+                'PNS' => 'fa-solid fa-id-card',
+                'BLU' => 'fa-solid fa-building-columns',
+                'Honorer' => 'fa-solid fa-user-tie',
+                'Outsourcing' => 'fa-solid fa-users-gear',
+                'PKWT' => 'fa-solid fa-file-signature',
+                'PPPK' => 'fa-solid fa-user-check',
+                'Non BLU' => 'fa-solid fa-user-slash',
+                'PPPK Paruh Waktu' => 'fa-solid fa-user-pen',
+                default => 'fa-solid fa-users',
+            },
+        ];
+    }
+
+    private function makeLevelCard(string $title, int $value): array
+    {
+        $styles = [
+            'Tendik' => [
+                'bg' => 'bg-emerald-600',
+                'iconBg' => 'bg-emerald-100',
+                'iconColor' => 'text-emerald-700',
+                'icon' => 'fa-solid fa-users-gear',
+                'textColor' => 'text-white',
+            ],
+            'Dosen' => [
+                'bg' => 'bg-blue-600',
+                'iconBg' => 'bg-blue-100',
+                'iconColor' => 'text-blue-700',
+                'icon' => 'fa-solid fa-chalkboard-user',
+                'textColor' => 'text-white',
+            ],
+            'Dosen DT' => [
+                'bg' => 'bg-indigo-600',
+                'iconBg' => 'bg-indigo-100',
+                'iconColor' => 'text-indigo-700',
+                'icon' => 'fa-solid fa-user-tie',
+                'textColor' => 'text-white',
+            ],
+            'Dosen Luar Biasa' => [
+                'bg' => 'bg-purple-600',
+                'iconBg' => 'bg-purple-100',
+                'iconColor' => 'text-purple-700',
+                'icon' => 'fa-solid fa-briefcase',
+                'textColor' => 'text-white',
+            ],
+        ];
+
+        $style = $styles[$title] ?? [
+            'bg' => 'bg-slate-600',
+            'iconBg' => 'bg-slate-100',
+            'iconColor' => 'text-slate-700',
+            'icon' => 'fa-solid fa-user-graduate',
+            'textColor' => 'text-white',
+        ];
+
+        return [
+            'label' => $title,
+            'value' => $value,
+            'bg' => $style['bg'],
+            'iconBg' => $style['iconBg'],
+            'iconColor' => $style['iconColor'],
+            'icon' => $style['icon'],
+            'textColor' => $style['textColor'],
+        ];
+    }
+
+
+    public function getApiData(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'kodeData' => ['nullable', 'string', 'max:50'],
+            'nip' => ['nullable', 'string', 'max:50'],
+            'count' => ['nullable', 'integer', 'in:1'],
+            'status_pegawai' => ['nullable', 'integer', 'in:' . implode(',', $this->statusPegawaiIds())],
+            'status_kerja' => ['nullable', 'integer', 'in:' . implode(',', $this->statusKerjaIds())],
+            'level_pegawai' => ['nullable', 'integer', 'in:' . implode(',', $this->levelPegawaiIds())],
+            'jabatan' => ['nullable', 'integer', 'in:' . implode(',', $this->jabatanIds())],
+        ]);
+
+        $parameter = array_filter([
+            'kodeData' => $validated['kodeData'] ?? null,
+            'nip' => $validated['nip'] ?? null,
+            'count' => $validated['count'] ?? 1,
+            'status_pegawai' => $validated['status_pegawai'] ?? 1,
+            'status_kerja' => $validated['status_kerja'] ?? null,
+            'level_pegawai' => $validated['level_pegawai'] ?? null,
+            'jabatan' => $validated['jabatan'] ?? null,
+        ], static fn(mixed $value): bool => $value !== null && $value !== '');
+
+        $response = $this->pegawaiService->getData($parameter);
+
+        return response()->json([
+            'success' => $response->success,
+            'status' => $response->success,
+            'total' => $response->data['total'] ?? 0,
+            'data' => $response->data['data'] ?? $response->data ?? [],
+            'message' => $response->message,
+        ]);
+    }
+
+    private function validatedFilters(Request $request): array
+    {
+        return $request->validate([
+            'status_pegawai' => ['nullable', 'integer', 'in:' . implode(',', $this->statusPegawaiIds())],
+            'status_kerja' => ['nullable', 'integer', 'in:' . implode(',', $this->statusKerjaIds())],
+            'level_pegawai' => ['nullable', 'integer', 'in:' . implode(',', $this->levelPegawaiIds())],
+            'jabatan' => ['nullable', 'integer', 'in:' . implode(',', $this->jabatanIds())],
+        ]);
+    }
+
+    private function parameterUtama(array $validated): array
+    {
+        return array_filter([
+            'count' => 1,
+            'status_pegawai' => $validated['status_pegawai'] ?? 1,
+            'status_kerja' => $validated['status_kerja'] ?? null,
+            'level_pegawai' => $validated['level_pegawai'] ?? null,
+            'jabatan' => $validated['jabatan'] ?? null,
+        ], static fn(mixed $value): bool => $value !== null && $value !== '');
+    }
+
+    private function parameterStatusKerja(int $statusKerja): array
+    {
+        return [
+            'count' => 1,
+            'status_kerja' => $statusKerja,
+        ];
+    }
+
+    private function styleStatusPegawai(string $title): array
+    {
+        $styles = [
+            'Aktif' => [
+                'span' => 'lg:col-span-6 lg:row-span-2',
+                'bg' => 'bg-gradient-to-br from-violet-700 via-purple-600 to-fuchsia-500',
+                'icon' => 'fa-solid fa-circle-check',
+                'text' => 'text-white',
+                'iconBg' => 'bg-violet-100',
+                'iconColor' => 'text-violet-700'
+            ],
+
+            'Pensiun' => [
+                'span' => 'lg:col-span-3',
+                'bg' => 'bg-slate-800',
+                'icon' => 'fa-solid fa-user-clock',
+                'text' => 'text-white',
+                'iconBg' => 'bg-slate-100',
+                'iconColor' => 'text-slate-700',
+            ],
+
+            'Meninggal' => [
+                'span' => 'lg:col-span-3',
+                'bg' => 'bg-emerald-600',
+                'icon' => 'fa-solid fa-heart-crack',
+                'text' => 'text-white',
+                'iconBg' => 'bg-emerald-100',
+                'iconColor' => 'text-emerald-700',
+            ],
+
+            'Mutasi/Resign' => [
+                'span' => 'lg:col-span-3',
+                'bg' => 'bg-purple-600',
+                'icon' => 'fa-solid fa-right-left',
+                'text' => 'text-white',
+                'iconBg' => 'bg-white/15',
+                'iconColor' => 'text-white',
+            ],
+
+            'Alih Status' => [
+                'span' => 'lg:col-span-3',
+                'bg' => 'bg-amber-400',
+                'icon' => 'fa-solid fa-layer-group',
+                'text' => 'text-black',
+                'iconBg' => 'bg-white/15',
+                'iconColor' => 'text-white',
+            ],
+
+            'Cuti' => [
+                'span' => 'lg:col-span-3',
+                'bg' => 'bg-lime-400',
+                'icon' => 'fa-solid fa-umbrella-beach',
+                'text' => 'text-black',
+                'iconBg' => 'bg-lime-100',
+                'iconColor' => 'text-lime-700',
+
+            ],
+
+            'Tugas Belajar' => [
+                'span' => 'lg:col-span-3',
+                'bg' => 'bg-sky-500',
+                'icon' => 'fa-solid fa-graduation-cap',
+                'text' => 'text-white',
+                'iconBg' => 'bg-white/15',
+                'iconColor' => 'text-white',
+            ],
+
+            'Penugasan' => [
+                'span' => 'lg:col-span-3',
+                'bg' => 'bg-pink-500',
+                'icon' => 'fa-solid fa-briefcase',
+                'text' => 'text-white',
+                'iconBg' => 'bg-white/15',
+                'iconColor' => 'text-white',
+            ],
+
+            'Tugas Belajar Mandiri' => [
+                'span' => 'lg:col-span-3',
+                'bg' => 'bg-indigo-600',
+                'icon' => 'fa-solid fa-book-open-reader',
+                'text' => 'text-white',
+                'iconBg' => 'bg-white/15',
+                'iconColor' => 'text-white',
+            ],
+        ];
+
+        return $styles[$title] ?? [
+            'span' => 'lg:col-span-3',
+            'bg' => 'bg-violet-600',
+            'icon' => 'fa-solid fa-users',
+            'text' => 'text-white',
+            'iconBg' => 'bg-violet-100',
+            'iconColor' => 'text-violet-700',
+        ];
+    }
+
+    private function parameterStatusPegawai(int $statusPegawai): array
+    {
+        return [
+            'count' => 1,
+            'status_pegawai' => $statusPegawai,
+        ];
+    }
+
+    private function statistikPegawai(
+        string $title,
+        ApiResponse $hasilApi
+    ): array
+    {
+        $style = $this->styleStatusPegawai($title);
+
+        return [
+            'label' => $title,
+            'value' => $this->extractTotal($hasilApi),
+            'span' => $style['span'],
+            'bg' => $style['bg'],
+            'icon' => $style['icon'],
+            'text' => $style['text'],
+            'iconBg' => $style['iconBg'],
+            'iconColor' => $style['iconColor'],
+        ];
+    }
+
+    private function formatCard(string $title, ApiResponse $hasilApi): array
+    {
+        $styles = [
+            'Tendik' => [
+                'bg' => 'bg-emerald-600',
+                'iconBg' => 'bg-emerald-100',
+                'iconColor' => 'text-emerald-700',
+                'icon' => 'fa-solid fa-users-gear',
+                'textColor' => 'text-white',
+            ],
+            'Dosen' => [
+                'bg' => 'bg-blue-600',
+                'iconBg' => 'bg-blue-100',
+                'iconColor' => 'text-blue-700',
+                'icon' => 'fa-solid fa-chalkboard-user',
+                'textColor' => 'text-white',
+            ],
+            'Dosen DT' => [
+                'bg' => 'bg-indigo-600',
+                'iconBg' => 'bg-indigo-100',
+                'iconColor' => 'text-indigo-700',
+                'icon' => 'fa-solid fa-user-tie',
+                'textColor' => 'text-white',
+            ],
+            'Dosen Luar Biasa' => [
+                'bg' => 'bg-purple-600',
+                'iconBg' => 'bg-purple-100',
+                'iconColor' => 'text-purple-700',
+                'icon' => 'fa-solid fa-briefcase',
+                'textColor' => 'text-white',
+            ],
+        ];
+
+        $style = $styles[$title] ?? [
+            'bg' => 'bg-slate-600',
+            'iconBg' => 'bg-slate-100',
+            'iconColor' => 'text-slate-700',
+            'icon' => 'fa-solid fa-user-graduate',
+            'textColor' => 'text-white',
+        ];
+
+        return [
+            'label' => $title,
+            'value' => $this->extractTotal($hasilApi),
+            'bg' => $style['bg'],
+            'iconBg' => $style['iconBg'],
+            'iconColor' => $style['iconColor'],
+            'icon' => $style['icon'],
+            'textColor' => $style['textColor'],
+        ];
+    }
+
+    public function getByNip(string $nip): JsonResponse
+    {
+        $response = $this->pegawaiService->getData([
+            'nip' => $nip
+        ]);
+
+        return response()->json([
+            'success' => $response->success,
+            'status' => $response->success,
+            'total' => is_array($response->data) ? count($response->data) : 0,
+            'data' => $response->data ?? [],
+            'message' => $response->message,
+        ]);
+    }
+
+    /**
+     * Extract total from ApiResponse data
+     */
+    private function extractTotal(ApiResponse $response): int
+    {
+        $data = $response->data ?? [];
+        
+        if (is_array($data) && isset($data['total'])) {
+            return (int) $data['total'];
+        } elseif (is_object($data) && property_exists($data, 'total')) {
+            return (int) $data->total;
+        }
+        
+        return 0;
+    }
+
+    /**
+     * [Direktori Profil Dosen]: Menampilkan daftar profil dosen dengan fitur
+     * pencarian (nama, NIP, fakultas, jabatan) dan filter fakultas/jabatan.
+     */
+    public function profilDosenIndex(Request $request): View
+    {
+        $selectedKategori = strtolower(trim((string) $request->input('kategori', 'semua')));
+        if (!in_array($selectedKategori, ['semua', 'dosen', 'staf'], true)) {
+            $selectedKategori = 'semua';
+        }
+
+        $search = trim((string) $request->input('search', ''));
+        $selectedFakultas = trim((string) $request->input('fakultas', ''));
+        $selectedJabatan = trim((string) $request->input('jabatan', ''));
+        $selectedStatusKerja = trim((string) $request->input('status_kerja', ''));
+
+        $summaries = \Illuminate\Support\Facades\DB::table('pegawai_summaries')->get();
+        if ($summaries->isEmpty()) {
+            $summaries = \Illuminate\Support\Facades\DB::table('pegawais')
+                ->selectRaw("unit_kerja, status_kerja, level_pegawai, jabatan, COUNT(*) as jumlah, SUM(CASE WHEN LOWER(COALESCE(jabatan, '')) LIKE ? OR LOWER(COALESCE(jabatan, '')) LIKE ? OR LOWER(COALESCE(gelar_depan, '')) LIKE ? OR LOWER(COALESCE(nama, '')) LIKE ? THEN 1 ELSE 0 END) as guru_besar", ['%guru besar%', '%profesor%', '%prof%', '%prof.%'])
+                ->groupBy('unit_kerja', 'status_kerja', 'level_pegawai', 'jabatan')
+                ->get();
+        }
+
+        $isDosenLevel = fn ($level): bool => str_contains(strtolower(trim((string) $level)), 'dosen');
+
+        $countSemua = (int) $summaries->sum('jumlah');
+        $countDosen = (int) $summaries->filter(fn ($row) => $isDosenLevel($row->level_pegawai))->sum('jumlah');
+        $countStaf = $countSemua - $countDosen;
+
+        $categorySummaries = match ($selectedKategori) {
+            'dosen' => $summaries->filter(fn ($row) => $isDosenLevel($row->level_pegawai)),
+            'staf' => $summaries->filter(fn ($row) => !$isDosenLevel($row->level_pegawai)),
+            default => $summaries,
+        };
+        $totalKategori = (int) $categorySummaries->sum('jumlah');
+
+        $totalDosen = $countDosen;
+        $totalStaf = $countStaf;
+        $totalGuruBesar = (int) $summaries->sum('guru_besar');
+        $totalLektorKepala = (int) $summaries->filter(fn ($row) => stripos(trim((string) $row->jabatan), 'Lektor Kepala') !== false)->sum('jumlah');
+        $totalLektor = (int) $summaries->filter(function ($row) {
+            $j = trim((string) $row->jabatan);
+            return stripos($j, 'Lektor') !== false && stripos($j, 'Lektor Kepala') === false;
+        })->sum('jumlah');
+        $totalAsistenAhli = (int) $summaries->filter(fn ($row) => stripos(trim((string) $row->jabatan), 'Asisten Ahli') !== false)->sum('jumlah');
+
+        $statusKerjaOptions = $categorySummaries->map(fn ($row) => trim((string) $row->status_kerja))->filter()->unique()->sort()->values()->all();
+        $jabatanOptions = $categorySummaries->map(fn ($row) => trim((string) $row->jabatan))->filter()->unique()->sort()->values()->all();
+
+        $facultyCounts = [];
+        foreach ($categorySummaries as $row) {
+            $f = trim((string) $row->unit_kerja);
+            if ($f !== '') {
+                $facultyCounts[$f] = ($facultyCounts[$f] ?? 0) + (int) $row->jumlah;
+            }
+        }
+        arsort($facultyCounts);
+        $facultyOptions = array_keys($facultyCounts);
+
+        $query = \App\Models\Pegawai::query();
+
+        if ($selectedKategori === 'dosen') {
+            $query->whereRaw("LOWER(COALESCE(level_pegawai, '')) LIKE ?", ['%dosen%']);
+        } elseif ($selectedKategori === 'staf') {
+            $query->whereRaw("LOWER(COALESCE(level_pegawai, '')) NOT LIKE ?", ['%dosen%']);
+        }
+
+        if ($search !== '') {
+            $like = '%' . mb_strtolower($search) . '%';
+            $query->where(function ($q) use ($like) {
+                $q->whereRaw("LOWER(COALESCE(nama, '')) LIKE ?", [$like])
+                    ->orWhereRaw("LOWER(COALESCE(gelar_depan, '')) LIKE ?", [$like])
+                    ->orWhereRaw("LOWER(COALESCE(gelar_belakang, '')) LIKE ?", [$like])
+                    ->orWhereRaw("LOWER(COALESCE(nip, '')) LIKE ?", [$like])
+                    ->orWhereRaw("LOWER(COALESCE(jabatan, '')) LIKE ?", [$like])
+                    ->orWhereRaw("LOWER(COALESCE(kode_data, '')) LIKE ?", [$like])
+                    ->orWhereRaw("LOWER(COALESCE(unit_kerja, '')) LIKE ?", [$like]);
+            });
+        }
+
+        if ($selectedFakultas !== '') {
+            $query->whereRaw("LOWER(TRIM(COALESCE(unit_kerja, ''))) = ?", [mb_strtolower($selectedFakultas)]);
+        }
+
+        if ($selectedJabatan !== '') {
+            if ($selectedJabatan === 'Guru Besar') {
+                $query->where(function ($q) {
+                    $q->whereRaw("LOWER(COALESCE(jabatan, '')) LIKE ?", ['%guru besar%'])
+                        ->orWhereRaw("LOWER(COALESCE(jabatan, '')) LIKE ?", ['%profesor%']);
+                });
+            } else {
+                $query->whereRaw("LOWER(COALESCE(jabatan, '')) LIKE ?", ['%' . mb_strtolower($selectedJabatan) . '%']);
+            }
+        }
+
+        if ($selectedStatusKerja !== '') {
+            $query->whereRaw("LOWER(TRIM(COALESCE(status_kerja, ''))) = ?", [mb_strtolower($selectedStatusKerja)]);
+        }
+
+        $paginatedDosen = $query->paginate(20)->withQueryString()->through(
+            fn ($row) => $this->pegawaiService->normalizePegawaiItem($this->pegawaiService->mapDbPegawaiToItem($row))
+        );
+        $totalFiltered = $paginatedDosen->total();
+
+        return view('Pegawai.profil-dosen-index', [
+            'title' => $selectedKategori === 'dosen' ? 'Direktori Dosen' : ($selectedKategori === 'staf' ? 'Direktori Staf (Tendik)' : 'Direktori Pegawai'),
+            'selectedKategori' => $selectedKategori,
+            'countSemua' => $countSemua,
+            'countDosen' => $countDosen,
+            'countStaf' => $countStaf,
+            'dosens' => $paginatedDosen,
+            'facultyOptions' => $facultyOptions,
+            'facultyCounts' => $facultyCounts,
+            'selectedFakultas' => $selectedFakultas,
+            'totalDosen' => $totalDosen,
+            'totalStaf' => $totalStaf,
+            'totalKategori' => $totalKategori,
+            'totalGuruBesar' => $totalGuruBesar,
+            'totalLektorKepala' => $totalLektorKepala,
+            'totalLektor' => $totalLektor,
+            'totalAsistenAhli' => $totalAsistenAhli,
+            'totalFiltered' => $totalFiltered,
+            'search' => $search,
+            'selectedJabatan' => $selectedJabatan,
+            'selectedStatusKerja' => $selectedStatusKerja,
+            'statusKerjaOptions' => $statusKerjaOptions,
+            'jabatanOptions' => $jabatanOptions,
+        ]);
+    }
+
+    /**
+     * Tampilkan halaman profil khusus untuk staf / Tenaga Kependidikan (Tendik).
+     */
+    public function profilStafShow(Request $request, string $nip): View
+    {
+        $nip = trim($nip);
+        $record = \App\Models\Pegawai::where('nip', $nip)->orWhere('kode_data', $nip)->first();
+        $staf = $record ? $this->pegawaiService->normalizePegawaiItem($this->pegawaiService->mapDbPegawaiToItem($record)) : null;
+
+        $isDataEmpty = empty($staf);
+        $staf ??= ['nip' => $nip];
+
+        $unitKerja = trim((string) ($staf['unitKerja'] ?? $staf['unit_kerja'] ?? ''));
+        $namaLengkap = $staf['nama_pegawai_lengkap'] ?? $staf['nama_pegawai'] ?? $staf['nama'] ?? 'Staf';
+
+        return view('Pegawai.profil-staf', [
+            'title' => 'Profil Staf - ' . $namaLengkap,
+            'staf' => $staf,
+            'isDataEmpty' => $isDataEmpty,
+            'unitKerja' => $unitKerja,
+        ]);
+    }
+}

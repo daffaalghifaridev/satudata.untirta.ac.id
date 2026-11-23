@@ -1,0 +1,69 @@
+<?php
+
+return [
+
+    /*
+    |--------------------------------------------------------------------------
+    | Third Party Services
+    |--------------------------------------------------------------------------
+    |
+    | This file is for storing the credentials for third party services such
+    | as Mailgun, Postmark, AWS and more. This file provides the de facto
+    | location for this type of information, allowing packages to have
+    | a conventional file to locate the various service credentials.
+    |
+    */
+
+    'postmark' => [
+        'key' => env('POSTMARK_API_KEY'),
+    ],
+
+    'resend' => [
+        'key' => env('RESEND_API_KEY'),
+    ],
+
+    'ses' => [
+        'key' => env('AWS_ACCESS_KEY_ID'),
+        'secret' => env('AWS_SECRET_ACCESS_KEY'),
+        'region' => env('AWS_DEFAULT_REGION', 'us-east-1'),
+    ],
+
+    'slack' => [
+        'notifications' => [
+            'bot_user_oauth_token' => env('SLACK_BOT_USER_OAUTH_TOKEN'),
+            'channel' => env('SLACK_BOT_USER_DEFAULT_CHANNEL'),
+        ],
+    ],
+
+    'siakang' => [
+        'base_url' => env('SIAKANG_API_URL') ?: env('SIAKANG_API_BASE_URL'),
+        'mahasiswa_aktif_url' => env('SIAKANG_MAHASISWA_AKTIF_URL'),
+        'token' => env('SIAKANG_API_TOKEN'),
+        'cf_clearance' => env('SIAKANG_CF_CLEARANCE'),
+        'user_agent' => env('SIAKANG_API_USER_AGENT'),
+        'cookie' => env('SIAKANG_API_COOKIE'),
+    ],
+
+    'simpeg' => [
+        'base_url' => env('SIMPEG_API_URL') ?? env('SIMPEG_API_BASE_URL'),
+        'key' => env('SIMPEG_API_KEY'),
+        'value' => env('SIMPEG_API_VALUE'),
+    ],
+
+    'simantap' => [
+        'base_url' => env('SIMANTAP_API_BASE_URL'),
+        'token' => env('SIMANTAP_API_TOKEN'),
+        'email' => env('SIMANTAP_API_EMAIL'),
+        'password' => env('SIMANTAP_API_PASSWORD'),
+    ],
+
+    'sipp' => [
+        'base_url' => env('SIPP_API_BASE_URL'),
+        'token' => env('SIPP_API_TOKEN'),
+        'username' => env('SIPP_API_USERNAME'),
+        'password' => env('SIPP_API_PASSWORD'),
+        'cf_clearance' => env('SIPP_CF_CLEARANCE'),
+        'user_agent' => env('SIPP_API_USER_AGENT'),
+        'cookie' => env('SIPP_API_COOKIE'),
+    ],
+];

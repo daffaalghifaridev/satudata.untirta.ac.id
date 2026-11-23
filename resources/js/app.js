@@ -1,0 +1,1419 @@
+import Chart from 'chart.js/auto';
+import {marked} from "marked";
+
+window.Chart = Chart;
+window.marked = marked;
+
+// Alpine TIDAK dijalankan di sini: skrip Livewire sudah membawa Alpine dan mendaftarkan
+// direktif wire:*/x-*/miliknya sebelum menjalankannya. Ketika app.js memanggil
+// Alpine.start() lebih dulu, Alpine menginisialisasi DOM tanpa plugin Livewire — semua
+// wire:model/wire:click jadi mati (mis. filter halaman Mahasiswa Lulus tidak menyaring).
+
+// chart Mahasiswa
+window.initStatistikMahasiswaCharts = function (ChartLibrary) {
+    const root = document.querySelector('[data-statistik-mahasiswa-root]');
+    if (!root) return;
+
+    const payload = JSON.parse(root.getAttribute('data-payload'));
+    const chartData = payload.chartCatalog;
+    const canvas = root.querySelector('[data-statistik-mahasiswa-chart]');
+    const ctx = canvas?.getContext('2d');
+
+    if (!ctx || !chartData || !chartData.datasets) return;
+
+    const originalLabels = [...chartData.labels];
+    const originalDatasets = chartData.datasets.map(ds => ({
+        ...ds,
+        data: [...ds.data]
+    }));
+
+    const rawProdi = chartData.raw_prodi || [];
+    const daftarJenjang = ['Diploma 3', 'Sarjana', 'Profesi', 'Magister', 'Doktor'];
+
+    const jenjangColors = {
+        'Mahasiswa Diploma 3': {bg: '#0f766e', text: '#ffffff'},
+        'Mahasiswa Sarjana': {bg: '#10b981', text: '#ffffff'},
+        'Mahasiswa Profesi': {bg: '#14b8a6', text: '#ffffff'},
+        'Mahasiswa Magister': {bg: '#6ee7b7', text: '#0f172a'},
+        'Mahasiswa Doktor': {bg: '#a7f3d0', text: '#0f172a'},
+    };
+
+    const styledDatasets = originalDatasets.map(ds => {
+        const color = jenjangColors[ds.label] || {bg: '#3b82f6', text: '#ffffff'};
+        return {
+            label: ds.label,
+            data: ds.data,
+            backgroundColor: color.bg,
+            borderColor: '#ffffff',
+            borderWidth: 1,
+            borderRadius: 2,
+            maxBarThickness: 48,
+        };
+    });
+
+    const stackedBarNumbersPlugin = {
+        id: 'stackedBarNumbers',
+        afterDatasetsDraw(chart) {
+            const {ctx, data, scales: {x}} = chart;
+            ctx.save();
+            ctx.textAlign = 'center';
+            ctx.font = '600 11px sans-serif';
+            ctx.textBaseline = 'middle';
+
+            chart.data.datasets.forEach((dataset, dsIndex) => {
+                const meta = chart.getDatasetMeta(dsIndex);
+                if (meta.hidden) return;
+
+                meta.data.forEach((bar, index) => {
+                    const value = dataset.data[index];
+                    if (!value || value === 0) return;
+
+                    const height = Math.abs(bar.base - bar.y);
+                    if (height > 18) {
+                        const colorConfig = jenjangColors[dataset.label] || {text: '#ffffff'};
+                        ctx.fillStyle = colorConfig.text;
+                        ctx.fillText(value.toLocaleString('id-ID'), bar.x, bar.y + (height / 2));
+                    }
+                });
+            });
+
+            ctx.font = '800 12px sans-serif';
+            ctx.fillStyle = '#0f172a';
+            ctx.textBaseline = 'bottom';
+
+            for (let i = 0; i < data.labels.length; i++) {
+                let total = 0;
+                let minTopY = chart.chartArea.bottom;
+
+                chart.data.datasets.forEach((dataset, dsIdx) => {
+                    const meta = chart.getDatasetMeta(dsIdx);
+                    if (!meta.hidden) {
+                        const val = dataset.data[i] || 0;
+                        total += val;
+                        const bar = meta.data[i];
+                        if (bar && val > 0 && bar.y < minTopY) {
+                            minTopY = bar.y;
+                        }
+                    }
+                });
+
+                if (total > 0 && minTopY < chart.chartArea.bottom) {
+                    ctx.fillText(total.toLocaleString('id-ID'), x.getPixelForValue(i), minTopY - 5);
+                }
+            }
+            ctx.restore();
+        }
+    };
+
+    const myChart = new ChartLibrary(ctx, {
+        type: 'bar',
+        plugins: [stackedBarNumbersPlugin],
+        data: {
+            labels: originalLabels,
+            datasets: styledDatasets
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            layout: {padding: {top: 30}},
+            animation: {duration: 1000, easing: 'easeOutQuart'},
+            interaction: {mode: 'index', intersect: false},
+            plugins: {
+                legend: {
+                    display: true,
+                    position: 'bottom',
+                    labels: {
+                        usePointStyle: true,
+                        boxWidth: 8,
+                        font: {size: 11, weight: '600'},
+                        color: '#475569',
+                        padding: 15
+                    }
+                },
+                tooltip: {
+                    backgroundColor: 'rgba(15, 23, 42, 0.92)',
+                    titleFont: {size: 13, weight: 'bold'},
+                    bodyFont: {size: 13},
+                    padding: 12,
+                    cornerRadius: 8,
+                    callbacks: {
+                        label: (context) => `  ${context.dataset.label}: ${context.parsed.y.toLocaleString('id-ID')}`
+                    }
+                }
+            },
+            scales: {
+                x: {
+                    stacked: true,
+                    grid: {display: false, drawBorder: false},
+                    ticks: {
+                        font: {size: 11, weight: '500'},
+                        color: '#475569',
+                        maxRotation: 45,
+                        minRotation: 45,
+                        callback: function (value) {
+                            let label = this.getLabelForValue(value);
+                            return label.length > 18 ? label.slice(0, 18) + '...' : label;
+                        }
+                    }
+                },
+                y: {
+                    stacked: true,
+                    beginAtZero: true,
+                    grid: {color: '#f1f5f9', drawBorder: false},
+                    ticks: {
+                        font: {size: 11},
+                        color: '#64748b',
+                        callback: (val) => val.toLocaleString('id-ID')
+                    }
+                }
+            }
+        }
+    });
+
+    const buildProdiChartData = (selectedFacultyName) => {
+        const prodiInFaculty = rawProdi.filter(p => p.fakultas === selectedFacultyName);
+        const cleanName = (name) => name.replace(/\s*\((D3|D4|S1|S2|S3|Profesi)\)/gi, '').trim();
+        const prodiLabels = [...new Set(prodiInFaculty.map(p => cleanName(p.nama_prodi)))];
+
+        const newDatasets = daftarJenjang.map(jenjang => {
+            const labelJenjang = 'Mahasiswa ' + jenjang;
+            const color = jenjangColors[labelJenjang] || {bg: '#3b82f6', text: '#ffffff'};
+
+            const dataValues = prodiLabels.map(labelProdi => {
+                return prodiInFaculty
+                    .filter(p => cleanName(p.nama_prodi) === labelProdi && p.jenjang === jenjang)
+                    .reduce((sum, p) => sum + parseInt(p.jumlah_mahasiswa_aktif || 0, 10), 0);
+            });
+
+            return {
+                label: labelJenjang,
+                data: dataValues,
+                backgroundColor: color.bg,
+                borderColor: '#ffffff',
+                borderWidth: 1,
+                borderRadius: 2,
+                maxBarThickness: 48,
+            };
+        });
+
+        return {labels: prodiLabels, datasets: newDatasets};
+    };
+
+    const facultySelect = root.querySelector('[data-statistik-mahasiswa-faculty]');
+    const yearSelect = root.querySelector('[data-statistik-mahasiswa-year]');
+    const semesterSelect = root.querySelector('[data-statistik-mahasiswa-semester]');
+
+    facultySelect?.addEventListener('change', (e) => {
+        const selectedFaculty = e.target.value;
+
+        if (selectedFaculty === 'Semua Fakultas') {
+            myChart.data.labels = [...originalLabels];
+            myChart.data.datasets = styledDatasets.map(ds => ({
+                ...ds,
+                data: [...ds.data]
+            }));
+        } else {
+            const prodiData = buildProdiChartData(selectedFaculty);
+            myChart.data.labels = prodiData.labels;
+            myChart.data.datasets = prodiData.datasets;
+        }
+
+        myChart.update();
+    });
+
+    const handleServerFilter = () => {
+        const url = new URL(window.location.href);
+        if (yearSelect) url.searchParams.set('tahun', yearSelect.value);
+        if (semesterSelect) url.searchParams.set('semester', semesterSelect.value);
+        window.location.href = url.toString();
+    };
+
+    yearSelect?.addEventListener('change', handleServerFilter);
+    semesterSelect?.addEventListener('change', handleServerFilter);
+};
+
+// chart Peminat
+window.initJumlahPeminatChart = function (ChartLibrary) {
+    const root = document.querySelector('[data-peminat-root]');
+    if (!root) return;
+
+    const rawData = JSON.parse(root.getAttribute('data-payload'));
+    const canvas = root.querySelector('[data-peminat-chart]');
+    const ctx = canvas?.getContext('2d');
+
+    if (!ctx || !rawData) return;
+
+    const labels = Object.keys(rawData);
+    const dataNasional = labels.map(year => rawData[year]['Seleksi Nasional'] || 0);
+    const dataMandiri = labels.map(year => rawData[year]['Seleksi Mandiri'] || 0);
+    const dataLainnya = labels.map(year => rawData[year]['Lainnya'] || 0);
+
+    const peminatNumbersPlugin = {
+        id: 'peminatNumbers',
+        afterDatasetsDraw(chart) {
+            const {ctx, data, scales: {x}} = chart;
+            ctx.save();
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+
+            chart.data.datasets.forEach((dataset, dsIndex) => {
+                const meta = chart.getDatasetMeta(dsIndex);
+                if (meta.hidden) return;
+
+                meta.data.forEach((bar, index) => {
+                    const value = dataset.data[index];
+                    if (!value || value <= 500) return;
+
+                    const height = Math.abs(bar.base - bar.y);
+                    if (height > 18) {
+                        ctx.font = '600 11px sans-serif';
+                        ctx.fillStyle = dsIndex === 2 ? '#1f2937' : '#ffffff';
+                        ctx.fillText(value.toLocaleString('id-ID'), bar.x, bar.y + (height / 2));
+                    }
+                });
+            });
+
+            ctx.font = '700 12px sans-serif';
+            ctx.fillStyle = '#1f2937';
+            ctx.textBaseline = 'bottom';
+
+            for (let i = 0; i < data.labels.length; i++) {
+                let total = 0;
+                let minTopY = chart.chartArea.bottom;
+
+                chart.data.datasets.forEach((dataset, dsIdx) => {
+                    const meta = chart.getDatasetMeta(dsIdx);
+                    if (!meta.hidden) {
+                        const val = dataset.data[i] || 0;
+                        total += val;
+                        const bar = meta.data[i];
+                        if (bar && val > 0 && bar.y < minTopY) {
+                            minTopY = bar.y;
+                        }
+                    }
+                });
+
+                if (total > 0 && minTopY < chart.chartArea.bottom) {
+                    ctx.fillText(total.toLocaleString('id-ID'), x.getPixelForValue(i), minTopY - 6);
+                }
+            }
+            ctx.restore();
+        }
+    };
+
+    new ChartLibrary(ctx, {
+        type: 'bar',
+        plugins: [peminatNumbersPlugin],
+        data: {
+            labels: labels,
+            datasets: [
+                {
+                    label: 'Seleksi Nasional',
+                    data: dataNasional,
+                    backgroundColor: '#0B3D91',
+                    borderWidth: 0,
+                    maxBarThickness: 48,
+                },
+                {
+                    label: 'Seleksi Mandiri',
+                    data: dataMandiri,
+                    backgroundColor: '#64B5F6',
+                    borderWidth: 0,
+                    maxBarThickness: 48,
+                },
+                {
+                    label: 'Lainnya',
+                    data: dataLainnya,
+                    backgroundColor: '#E3F2FD',
+                    borderWidth: 0,
+                    borderRadius: 0,
+                    maxBarThickness: 48,
+                }
+            ]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            layout: {padding: {top: 25}},
+            animation: {duration: 800, easing: 'easeOutQuart'},
+            interaction: {mode: 'index', intersect: false},
+            plugins: {
+                legend: {
+                    display: true,
+                    position: 'bottom',
+                    labels: {
+                        usePointStyle: true,
+                        boxWidth: 8,
+                        font: {size: 11, weight: '600'},
+                        color: '#475569',
+                        padding: 15
+                    }
+                },
+                tooltip: {
+                    backgroundColor: 'rgba(15, 23, 42, 0.92)',
+                    titleFont: {size: 13, weight: 'bold'},
+                    bodyFont: {size: 13},
+                    padding: 12,
+                    cornerRadius: 0,
+                    callbacks: {
+                        label: (context) => `  ${context.dataset.label}: ${context.parsed.y.toLocaleString('id-ID')}`
+                    }
+                }
+            },
+            scales: {
+                x: {
+                    stacked: true,
+                    grid: {display: false, drawBorder: false},
+                    ticks: {
+                        font: {size: 12, weight: '600'},
+                        color: '#475569',
+                    }
+                },
+                y: {
+                    stacked: true,
+                    beginAtZero: true,
+                    grid: {color: '#f1f5f9', drawBorder: false},
+                    ticks: {
+                        font: {size: 11},
+                        color: '#64748b',
+                        callback: (val) => val >= 1000 ? (val / 1000) + 'k' : val
+                    }
+                }
+            }
+        }
+    });
+};
+
+// chart Sebaran Fakultas
+window.initSebaranFakultasChart = function (ChartLibrary) {
+    const root = document.querySelector('[data-fakultas-root]');
+    if (!root) return;
+
+    const rawData = JSON.parse(root.getAttribute('data-payload'));
+    const canvas = root.querySelector('[data-fakultas-chart]');
+    const ctx = canvas?.getContext('2d');
+
+    if (!ctx || !rawData || !Array.isArray(rawData)) return;
+
+    const fullNames = rawData.map(item => item.name || '-');
+    const dataLaki = rawData.map(item => parseInt(item.laki_laki || 0, 10));
+    const dataPerempuan = rawData.map(item => parseInt(item.perempuan || 0, 10));
+    const totals = rawData.map(item => parseInt(item.total || 0, 10));
+
+    const shortLabels = fullNames.map(name => {
+        if (name.includes('Teknik')) return 'FT';
+        if (name.includes('Hukum')) return 'FH';
+        if (name.includes('Pertanian')) return 'FAPERTA';
+        if (name.includes('Kedokteran')) return 'FKIK';
+        if (name.includes('Ekonomi')) return 'FEB';
+        if (name.includes('Sosial')) return 'FISIP';
+        if (name.includes('Keguruan')) return 'FKIP';
+        if (name.includes('Pascasarjana')) return 'Pascasarjana';
+
+        const words = name.replace(/Fakultas | dan /gi, '').split(' ');
+        return words.length > 1
+            ? (words[0][0] + words[1][0]).toUpperCase()
+            : name.slice(0, 3).toUpperCase();
+    });
+
+    const fakultasNumbersPlugin = {
+        id: 'fakultasNumbers',
+        afterDatasetsDraw(chart) {
+            const {ctx, data, scales: {x}} = chart;
+            ctx.save();
+            ctx.textAlign = 'center';
+            ctx.font = '700 11px sans-serif';
+            ctx.fillStyle = '#1f2937';
+            ctx.textBaseline = 'bottom';
+
+            for (let i = 0; i < data.labels.length; i++) {
+                let total = 0;
+                let minTopY = chart.chartArea.bottom;
+
+                chart.data.datasets.forEach((dataset, dsIdx) => {
+                    const meta = chart.getDatasetMeta(dsIdx);
+                    if (!meta.hidden) {
+                        const val = dataset.data[i] || 0;
+                        total += val;
+                        const bar = meta.data[i];
+                        if (bar && val > 0 && bar.y < minTopY) {
+                            minTopY = bar.y;
+                        }
+                    }
+                });
+
+                if (total > 0 && minTopY < chart.chartArea.bottom) {
+                    ctx.fillText(total.toLocaleString('id-ID'), x.getPixelForValue(i), minTopY - 6);
+                }
+            }
+            ctx.restore();
+        }
+    };
+
+    new ChartLibrary(ctx, {
+        type: 'bar',
+        plugins: [fakultasNumbersPlugin],
+        data: {
+            labels: shortLabels,
+            datasets: [
+                {
+                    label: 'Laki-laki',
+                    data: dataLaki,
+                    backgroundColor: '#ADD8E6',
+                    borderWidth: 0,
+                    maxBarThickness: 48,
+                },
+                {
+                    label: 'Perempuan',
+                    data: dataPerempuan,
+                    backgroundColor: '#4169E1',
+                    borderWidth: 0,
+                    borderRadius: 0,
+                    maxBarThickness: 48,
+                }
+            ]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            layout: {padding: {top: 25}},
+            animation: {duration: 800, easing: 'easeOutQuart'},
+            interaction: {mode: 'index', intersect: false},
+            plugins: {
+                legend: {
+                    display: true,
+                    position: 'bottom',
+                    labels: {
+                        usePointStyle: true,
+                        boxWidth: 8,
+                        font: {size: 11, weight: '600'},
+                        color: '#475569',
+                        padding: 15
+                    }
+                },
+                tooltip: {
+                    backgroundColor: 'rgba(15, 23, 42, 0.92)',
+                    titleFont: {size: 13, weight: 'bold'},
+                    bodyFont: {size: 13},
+                    padding: 12,
+                    cornerRadius: 8,
+                    callbacks: {
+                        title: (tooltipItems) => fullNames[tooltipItems[0].dataIndex],
+                        label: (context) => `  ${context.dataset.label}: ${context.parsed.y.toLocaleString('id-ID')}`,
+                        footer: (tooltipItems) => {
+                            let total = 0;
+                            tooltipItems.forEach(item => {
+                                total += item.parsed.y;
+                            });
+                            return `\n  Total: ${total.toLocaleString('id-ID')} Mahasiswa`;
+                        }
+                    }
+                }
+            },
+            scales: {
+                x: {
+                    stacked: true,
+                    grid: {display: false, drawBorder: false},
+                    ticks: {
+                        font: {size: 12, weight: '600'},
+                        color: '#475569',
+                    }
+                },
+                y: {
+                    stacked: true,
+                    beginAtZero: true,
+                    grid: {color: '#f1f5f9', drawBorder: false},
+                    ticks: {
+                        font: {size: 11},
+                        color: '#64748b',
+                        callback: (val) => val >= 1000 ? (val / 1000) + 'k' : val
+                    }
+                }
+            }
+        }
+    });
+};
+
+// chart Dosen by Fakultas
+window.initDosenFakultasChart = function (ChartLibrary) {
+    const root = document.querySelector('[data-dosen-fakultas-root]');
+    if (!root) return;
+
+    const rawData = JSON.parse(root.getAttribute('data-payload'));
+    const canvas = root.querySelector('[data-dosen-fakultas-chart]');
+    const ctx = canvas?.getContext('2d');
+
+    if (!ctx || !rawData || !Array.isArray(rawData)) return;
+
+    const fullNames = rawData.map(item => item.name || '-');
+    const dataTotal = rawData.map(item => parseInt(item.total || 0, 10));
+
+    const shortLabels = fullNames.map(name => {
+        if (name.includes('Teknik')) return 'FT';
+        if (name.includes('Hukum')) return 'FH';
+        if (name.includes('Pertanian')) return 'FAPERTA';
+        if (name.includes('Kedokteran')) return 'FKIK';
+        if (name.includes('Ekonomi')) return 'FEB';
+        if (name.includes('Sosial')) return 'FISIP';
+        if (name.includes('Keguruan')) return 'FKIP';
+        if (name.includes('Pascasarjana')) return 'Pascasarjana';
+
+        const words = name.replace(/Fakultas | dan /gi, '').split(' ');
+        return words.length > 1
+            ? (words[0][0] + words[1][0]).toUpperCase()
+            : name.slice(0, 3).toUpperCase();
+    });
+
+    const dosenFakultasNumbersPlugin = {
+        id: 'dosenFakultasNumbers',
+        afterDatasetsDraw(chart) {
+            const {ctx: c, data} = chart;
+            c.save();
+            c.font = '700 11px sans-serif';
+            c.fillStyle = '#1f2937';
+            c.textBaseline = 'bottom';
+
+            chart.data.datasets.forEach((dataset, dsIdx) => {
+                const meta = chart.getDatasetMeta(dsIdx);
+                if (meta.hidden) return;
+
+                meta.data.forEach((bar, index) => {
+                    const value = dataset.data[index];
+                    if (!value || value === 0) return;
+
+                    c.textAlign = 'center';
+                    c.fillText(value.toLocaleString('id-ID'), bar.x, bar.y - 4);
+                });
+            });
+
+            c.restore();
+        }
+    };
+
+    new ChartLibrary(ctx, {
+        type: 'bar',
+        plugins: [dosenFakultasNumbersPlugin],
+        data: {
+            labels: shortLabels,
+            datasets: [
+                {
+                    label: 'Dosen',
+                    data: dataTotal,
+                    backgroundColor: '#4F46E5',
+                    borderRadius: 4,
+                    maxBarThickness: 56,
+                }
+            ]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            layout: {padding: {top: 25}},
+            animation: {duration: 800, easing: 'easeOutQuart'},
+            interaction: {mode: 'index', intersect: false},
+            plugins: {
+                legend: {display: false},
+                tooltip: {
+                    backgroundColor: 'rgba(15, 23, 42, 0.92)',
+                    titleFont: {size: 13, weight: 'bold'},
+                    bodyFont: {size: 13},
+                    padding: 12,
+                    cornerRadius: 8,
+                    callbacks: {
+                        title: (tooltipItems) => fullNames[tooltipItems[0].dataIndex],
+                        label: (context) => `  Dosen: ${context.parsed.y.toLocaleString('id-ID')}`
+                    }
+                }
+            },
+            scales: {
+                x: {
+                    grid: {display: false, drawBorder: false},
+                    ticks: {
+                        font: {size: 12, weight: '600'},
+                        color: '#475569',
+                    }
+                },
+                y: {
+                    beginAtZero: true,
+                    grid: {color: '#f1f5f9', drawBorder: false},
+                    ticks: {
+                        font: {size: 11},
+                        color: '#64748b',
+                        callback: (val) => val.toLocaleString('id-ID')
+                    }
+                }
+            }
+        }
+    });
+};
+
+// chart Dosen by Status Kepegawaian
+window.initDosenStatusChart = function (ChartLibrary) {
+    const root = document.querySelector('[data-dosen-status-root]');
+    if (!root) return;
+
+    const rawData = JSON.parse(root.getAttribute('data-payload'));
+    const canvas = root.querySelector('[data-dosen-status-chart]');
+    const ctx = canvas?.getContext('2d');
+
+    if (!ctx || !rawData || !Array.isArray(rawData)) return;
+
+    const labels = rawData.map(item => item.label || '-');
+    const dataTotal = rawData.map(item => parseInt(item.total || 0, 10));
+
+    const palette = [
+        '#4F46E5', '#0EA5E9', '#10B981', '#F59E0B',
+        '#EF4444', '#8B5CF6', '#EC4899', '#14B8A6',
+        '#F97316', '#6366F1', '#64748B'
+    ];
+
+    const dosenStatusNumbersPlugin = {
+        id: 'dosenStatusNumbers',
+        afterDatasetsDraw(chart) {
+            const {ctx: c} = chart;
+            c.save();
+            c.font = '700 11px sans-serif';
+            c.fillStyle = '#1f2937';
+            c.textBaseline = 'middle';
+
+            chart.data.datasets.forEach((dataset, dsIdx) => {
+                const meta = chart.getDatasetMeta(dsIdx);
+                if (meta.hidden) return;
+
+                meta.data.forEach((bar, index) => {
+                    const value = dataset.data[index];
+                    if (!value || value === 0) return;
+
+                    const height = Math.abs(bar.base - bar.y);
+                    if (height > 18) {
+                        c.textAlign = 'center';
+                        c.fillText(value.toLocaleString('id-ID'), bar.x, bar.y + (height / 2));
+                    }
+                });
+            });
+
+            c.restore();
+        }
+    };
+
+    new ChartLibrary(ctx, {
+        type: 'doughnut',
+        plugins: [dosenStatusNumbersPlugin],
+        data: {
+            labels: labels,
+            datasets: [
+                {
+                    label: 'Dosen',
+                    data: dataTotal,
+                    backgroundColor: palette.slice(0, dataTotal.length),
+                    borderWidth: 2,
+                    borderColor: '#ffffff',
+                    hoverOffset: 8,
+                }
+            ]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            cutout: '58%',
+            animation: {duration: 800, easing: 'easeOutQuart'},
+            plugins: {
+                legend: {
+                    display: true,
+                    position: 'bottom',
+                    labels: {
+                        usePointStyle: true,
+                        boxWidth: 8,
+                        font: {size: 11, weight: '600'},
+                        color: '#475569',
+                        padding: 12
+                    }
+                },
+                tooltip: {
+                    backgroundColor: 'rgba(15, 23, 42, 0.92)',
+                    titleFont: {size: 13, weight: 'bold'},
+                    bodyFont: {size: 13},
+                    padding: 12,
+                    cornerRadius: 8,
+                    callbacks: {
+                        label: (context) => `  ${context.label}: ${context.parsed.toLocaleString('id-ID')}`
+                    }
+                }
+            }
+        }
+    });
+};
+
+// chart Aset Combo Stacked
+window.initAsetComboStackedChart = function (ChartLibrary) {
+    const canvas = document.querySelector('[data-aset-combo-chart]');
+    if (!canvas) return;
+
+    const payloadRaw = canvas.getAttribute('data-payload');
+    if (!payloadRaw) return;
+
+    let rawData = [];
+    try {
+        rawData = JSON.parse(payloadRaw);
+    } catch (e) {
+        console.error('Failed parsing data-payload for asset chart:', e);
+        return;
+    }
+
+    if (!Array.isArray(rawData) || rawData.length === 0) return;
+
+    const labels = rawData.map(k => (k.nama_kampus || '').replace('Kampus ', ''));
+    const dataBaik = rawData.map(k => k.kondisi_baik || 0);
+    const dataRusakBerat = rawData.map(k => k.kondisi_rusak_berat || 0);
+    const dataRusakRingan = rawData.map(k => k.kondisi_rusak_ringan || 0);
+    const dataTotal = rawData.map(k => k.total_unit || 0);
+
+    const hasRusakRingan = dataRusakRingan.some(v => v > 0);
+
+    const asetChartNumbersPlugin = {
+        id: 'asetChartNumbers',
+        afterDatasetsDraw(chart) {
+            const { ctx, data, scales: { x } } = chart;
+            ctx.save();
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+
+            chart.data.datasets.forEach((dataset, dsIndex) => {
+                if (dataset.type === 'line') return;
+                const meta = chart.getDatasetMeta(dsIndex);
+                if (meta.hidden) return;
+
+                meta.data.forEach((bar, index) => {
+                    const value = dataset.data[index];
+                    if (!value || value === 0) return;
+
+                    const height = Math.abs(bar.base - bar.y);
+                    if (height > 16) {
+                        ctx.font = '700 11px sans-serif';
+                        ctx.fillStyle = '#000000';
+                        ctx.fillText(value.toLocaleString('id-ID'), bar.x, bar.y + (height / 2));
+                    }
+                });
+            });
+
+            ctx.font = '800 13px sans-serif';
+            ctx.fillStyle = '#000000';
+            ctx.textBaseline = 'bottom';
+
+            for (let i = 0; i < data.labels.length; i++) {
+                let total = dataTotal[i] || 0;
+                let minTopY = chart.chartArea.bottom;
+
+                chart.data.datasets.forEach((dataset, dsIdx) => {
+                    if (dataset.type === 'line') return;
+                    const meta = chart.getDatasetMeta(dsIdx);
+                    if (!meta.hidden) {
+                        const val = dataset.data[i] || 0;
+                        const bar = meta.data[i];
+                        if (bar && val > 0 && bar.y < minTopY) {
+                            minTopY = bar.y;
+                        }
+                    }
+                });
+
+                if (total > 0 && minTopY < chart.chartArea.bottom) {
+                    ctx.fillText(total.toLocaleString('id-ID'), x.getPixelForValue(i), minTopY - 6);
+                }
+            }
+            ctx.restore();
+        }
+    };
+
+    const datasets = [
+        {
+            type: 'line',
+            label: 'Total Unit Aset',
+            data: dataTotal,
+            borderColor: '#ffb74d',
+            backgroundColor: '#ffb74d',
+            pointBackgroundColor: '#ffb74d',
+            pointBorderColor: '#ffffff',
+            pointBorderWidth: 2,
+            pointRadius: 5,
+            pointHoverRadius: 7,
+            borderWidth: 2.5,
+            tension: 0.3,
+            order: 1
+        },
+        {
+            type: 'bar',
+            label: 'Rusak Berat',
+            data: dataRusakBerat,
+            backgroundColor: '#ff5252',
+            stack: 'asetStack',
+            barThickness: 56,
+            borderRadius: hasRusakRingan ? 0 : { topLeft: 4, topRight: 4 },
+            order: 3
+        },
+        {
+            type: 'bar',
+            label: 'Kondisi Baik',
+            data: dataBaik,
+            backgroundColor: '#00e676',
+            stack: 'asetStack',
+            barThickness: 56,
+            borderRadius: { topLeft: 6, topRight: 6 },
+            order: 2
+        }
+    ];
+
+    if (hasRusakRingan) {
+        datasets.splice(2, 0, {
+            type: 'bar',
+            label: 'Rusak Ringan',
+            data: dataRusakRingan,
+            backgroundColor: '#b9f6ca',
+            stack: 'asetStack',
+            barThickness: 56,
+            order: 2.5
+        });
+    }
+
+    if (canvas._chartInstance) {
+        canvas._chartInstance.destroy();
+    }
+
+    canvas._chartInstance = new ChartLibrary(canvas, {
+        plugins: [asetChartNumbersPlugin],
+        data: {
+            labels: labels,
+            datasets: datasets
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            layout: {
+                padding: { top: 30, bottom: 10 }
+            },
+            interaction: {
+                mode: 'index',
+                intersect: false
+            },
+            plugins: {
+                legend: {
+                    display: false
+                },
+                tooltip: {
+                    backgroundColor: 'rgba(15, 23, 42, 0.92)',
+                    titleFont: { size: 13, weight: 'bold' },
+                    bodyFont: { size: 12 },
+                    padding: 12,
+                    cornerRadius: 8,
+                    callbacks: {
+                        title: (items) => 'Kampus ' + items[0].label,
+                        label: (context) => {
+                            const val = context.parsed.y || 0;
+                            return `  ${context.dataset.label}: ${val.toLocaleString('id-ID')} unit`;
+                        }
+                    }
+                }
+            },
+            scales: {
+                x: {
+                    stacked: true,
+                    grid: { display: false, drawBorder: false },
+                    ticks: {
+                        font: { size: 13, weight: '600' },
+                        color: '#4b5563',
+                        padding: 8
+                    }
+                },
+                y: {
+                    stacked: true,
+                    beginAtZero: true,
+                    grid: {
+                        color: '#f1f5f9',
+                        drawBorder: false
+                    },
+                    title: {
+                        display: true,
+                        text: 'Values',
+                        color: '#6b7280',
+                        font: { size: 12, weight: '500' }
+                    },
+                    ticks: {
+                        font: { size: 12 },
+                        color: '#6b7280',
+                        callback: (val) => val >= 1000 ? (val / 1000) + 'k' : val
+                    }
+                }
+            }
+        }
+    });
+};
+
+// chart Klasifikasi Barang (Kondisi Bar)
+window.initKondisiBarChart = function (ChartLibrary) {
+    const canvas = document.querySelector('[data-kondisi-bar-chart]');
+    if (!canvas) return;
+
+    const payloadRaw = canvas.getAttribute('data-payload');
+    if (!payloadRaw) return;
+
+    let chartData = {};
+    try {
+        chartData = JSON.parse(payloadRaw);
+    } catch (e) {
+        return;
+    }
+
+    const labels = chartData.labels || [];
+    const data = chartData.data || [];
+    const colors = ['#30A64A', '#FFA726', '#EF5350', '#42A5F5', '#AB47BC', '#78909C'];
+
+    if (canvas._chartInstance) {
+        canvas._chartInstance.destroy();
+    }
+
+    canvas._chartInstance = new ChartLibrary(canvas, {
+        type: 'bar',
+        data: {
+            labels: labels,
+            datasets: [{
+                label: 'Jumlah Barang',
+                data: data,
+                backgroundColor: labels.map((_, i) => colors[i % colors.length] + 'CC'),
+                borderColor: labels.map((_, i) => colors[i % colors.length]),
+                borderWidth: 2,
+                borderRadius: 8,
+                barThickness: 50,
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: { display: false },
+                tooltip: {
+                    backgroundColor: '#1f2937',
+                    titleFont: { size: 13, weight: '600' },
+                    bodyFont: { size: 12 },
+                    padding: 12,
+                    cornerRadius: 8,
+                    callbacks: {
+                        label: function(context) {
+                            const total = data.reduce((a, b) => a + b, 0);
+                            const percent = total > 0 ? ((context.raw / total) * 100).toFixed(1) : 0;
+                            return context.raw + ' barang (' + percent + '%)';
+                        }
+                    }
+                }
+            },
+            scales: {
+                y: {
+                    beginAtZero: true,
+                    ticks: { stepSize: 1, font: { size: 12 }, color: '#6b7280' },
+                    grid: { color: '#f3f4f6' }
+                },
+                x: {
+                    ticks: { autoSkip: false, font: { size: 11 }, color: '#374151', maxRotation: 45, minRotation: 0 },
+                    grid: { display: false }
+                }
+            }
+        }
+    });
+};
+
+// chart Pegawai
+window.initPegawaiCharts = function (ChartLibrary) {
+    document.querySelectorAll('[data-pegawai-chart]').forEach((canvas) => {
+        const payloadRaw = canvas.getAttribute('data-payload');
+        if (!payloadRaw) return;
+
+        let chartData = {};
+        try {
+            chartData = JSON.parse(payloadRaw);
+        } catch (e) {
+            return;
+        }
+
+        const type = canvas.getAttribute('data-type') || 'bar';
+        const title = canvas.getAttribute('data-title') || 'Statistik Pegawai';
+        const showLegend = canvas.getAttribute('data-show-legend') === 'true';
+        const isCartesian = canvas.getAttribute('data-is-cartesian') === 'true';
+        const dataset = JSON.parse(canvas.getAttribute('data-dataset') || '{}');
+        const labels = Array.isArray(chartData.labels) ? chartData.labels : Object.values(chartData.labels || {});
+
+        const total = (dataset.data || []).reduce((a, b) => a + b, 0);
+
+        if (canvas._chartInstance) {
+            canvas._chartInstance.destroy();
+        }
+
+        canvas._chartInstance = new ChartLibrary(canvas, {
+            type: type,
+            data: {
+                labels: labels,
+                datasets: [dataset]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                cutout: '68%',
+                plugins: {
+                    legend: {
+                        display: showLegend,
+                        position: 'bottom',
+                        labels: {
+                            padding: 12,
+                            usePointStyle: true,
+                            pointStyle: 'circle',
+                            font: { size: 11, weight: '500' },
+                            color: '#4b5563'
+                        }
+                    },
+                    tooltip: {
+                        backgroundColor: '#111827',
+                        titleFont: { size: 12, weight: '600' },
+                        bodyFont: { size: 12 },
+                        padding: 10,
+                        cornerRadius: 8,
+                        callbacks: {
+                            label: function (context) {
+                                const value = context.raw;
+                                const percent = total > 0 ? ((value / total) * 100).toFixed(1) : 0;
+                                return ' ' + value + ' orang' + (isCartesian ? '' : ' (' + percent + '%)');
+                            }
+                        }
+                    }
+                },
+                scales: isCartesian ? {
+                    y: {
+                        beginAtZero: true,
+                        ticks: { font: { size: 11 }, color: '#6b7280' },
+                        grid: { color: '#f3f4f6' }
+                    },
+                    x: {
+                        ticks: { autoSkip: false, font: { size: 11 }, color: '#374151', maxRotation: 0, minRotation: 0 },
+                        grid: { display: false }
+                    }
+                } : {}
+            }
+        });
+    });
+};
+
+// Nav mobile
+function initMobileMenu() {
+    const mobileMenuButton = document.querySelector('[data-mobile-menu-button]');
+    const mobileMenu = document.querySelector('[data-mobile-menu]');
+
+    if (!mobileMenuButton || !mobileMenu) return;
+
+    const openIcon = mobileMenuButton.querySelector('[data-menu-open-icon]');
+    const closeIcon = mobileMenuButton.querySelector('[data-menu-close-icon]');
+
+    const closeMobileMenu = () => {
+        mobileMenu.classList.add('hidden');
+        mobileMenuButton.setAttribute('aria-expanded', 'false');
+        openIcon?.classList.remove('hidden');
+        closeIcon?.classList.add('hidden');
+    };
+
+    mobileMenuButton.addEventListener('click', () => {
+        const isOpen = mobileMenuButton.getAttribute('aria-expanded') === 'true';
+
+        mobileMenu.classList.toggle('hidden', isOpen);
+        mobileMenuButton.setAttribute('aria-expanded', String(!isOpen));
+        openIcon?.classList.toggle('hidden', !isOpen);
+        closeIcon?.classList.toggle('hidden', isOpen);
+    });
+
+    window.addEventListener('resize', () => {
+        if (window.innerWidth >= 768) {
+            closeMobileMenu();
+        }
+    });
+}
+
+// Agent Drawer
+function initTirtaAgentDrawer() {
+    const shell = document.querySelector('[data-tirta-chat-shell]');
+    const panel = document.querySelector('[data-tirta-chat-panel]');
+    const input = document.querySelector('[data-tirta-input]');
+    const openButtons = document.querySelectorAll('[data-tirta-chat-open]');
+    const closeButtons = document.querySelectorAll('[data-tirta-chat-close]');
+
+    if (!shell || !panel || openButtons.length === 0) return;
+
+    const openDrawer = () => {
+        shell.classList.remove('hidden');
+        shell.setAttribute('aria-hidden', 'false');
+        document.body.classList.add('overflow-hidden');
+        requestAnimationFrame(() => {
+            panel.classList.remove('translate-x-full');
+            input?.focus();
+        });
+    };
+
+    const closeDrawer = () => {
+        panel.classList.add('translate-x-full');
+        shell.setAttribute('aria-hidden', 'true');
+        document.body.classList.remove('overflow-hidden');
+        window.setTimeout(() => {
+            shell.classList.add('hidden');
+        }, 200);
+    };
+
+    openButtons.forEach((button) => {
+        button.addEventListener('click', openDrawer);
+    });
+
+    closeButtons.forEach((button) => {
+        button.addEventListener('click', closeDrawer);
+    });
+
+    document.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape' && shell.getAttribute('aria-hidden') === 'false') {
+            closeDrawer();
+        }
+    });
+}
+
+// Agent
+function initTirtaAgentChats() {
+    document.querySelectorAll('[data-tirta-chat]').forEach((chat) => {
+        const form = chat.querySelector('[data-tirta-form]');
+        const input = chat.querySelector('[data-tirta-input]');
+        const messages = chat.querySelector('[data-tirta-messages]');
+        const submit = chat.querySelector('[data-tirta-submit]');
+        const status = chat.querySelector('[data-tirta-status]');
+        const counter = chat.querySelector('[data-tirta-counter]');
+        const typing = chat.querySelector('[data-tirta-typing]');
+        const promptButtons = chat.querySelectorAll('[data-tirta-prompt]');
+        const resetButtons = document.querySelectorAll('[data-tirta-chat-reset]');
+        let conversationId = window.sessionStorage.getItem('tirta_agent_conversation_id');
+
+        if (!form || !input || !messages || !submit || !status) return;
+
+        const sendIcon = submit.querySelector('[data-send-icon]');
+        const sendSpinner = submit.querySelector('[data-send-spinner]');
+
+        const renderMarkdown = (content) => {
+            if (window.marked && typeof window.marked.parse === 'function') {
+                try {
+                    const html = window.marked.parse(content);
+                    return window.DOMPurify ? DOMPurify.sanitize(html) : html;
+                } catch (e) {
+                    console.error('Failed parsing markdown:', e);
+                }
+            }
+            return content
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/\n/g, '<br>');
+        };
+
+        const scrollToBottom = () => {
+            messages.scrollTo({
+                top: messages.scrollHeight,
+                behavior: 'smooth'
+            });
+        };
+
+        const autosizeInput = () => {
+            input.style.height = 'auto';
+            input.style.height = `${Math.min(input.scrollHeight, 128)}px`;
+
+            if (counter) {
+                counter.textContent = `${input.value.length}/1000`;
+            }
+        };
+
+        const addMessage = (content, role) => {
+            if (typing) {
+                typing.classList.add('hidden');
+                typing.classList.remove('flex');
+            }
+
+            const row = document.createElement('div');
+            const bubble = document.createElement('div');
+            const avatar = document.createElement('div');
+
+            row.className = role === 'user'
+                ? 'flex justify-end'
+                : 'flex items-start gap-3';
+
+            if (role === 'assistant') {
+                avatar.className = 'mt-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-cyan-100 text-cyan-700';
+                avatar.innerHTML = '<i class="fa-solid fa-robot text-sm"></i>';
+                row.appendChild(avatar);
+            }
+
+            bubble.className = role === 'user'
+                ? 'max-w-[86%] rounded-2xl rounded-tr-md bg-cyan-600 p-4 text-sm leading-6 text-white shadow-sm'
+                : 'max-w-[86%] rounded-2xl rounded-tl-md bg-white p-4 text-sm leading-6 text-slate-700 shadow-sm ring-1 ring-slate-200 tirta-markdown-content';
+
+            if (role === 'assistant') {
+                bubble.innerHTML = renderMarkdown(content);
+                bubble.querySelectorAll('a').forEach((a) => {
+                    a.target = '_blank';
+                    a.rel = 'noopener noreferrer';
+                });
+            } else {
+                bubble.textContent = content;
+            }
+
+            row.appendChild(bubble);
+            const time = document.createElement('div');
+
+            time.className = 'mt-2 text-[11px] opacity-70';
+            time.textContent = new Date().toLocaleTimeString('id-ID', {
+                hour: '2-digit',
+                minute: '2-digit'
+            });
+
+            bubble.appendChild(time);
+
+            if (typing && typing.parentNode === messages) {
+                messages.insertBefore(row, typing);
+            } else {
+                messages.appendChild(row);
+            }
+
+            scrollToBottom();
+        };
+
+        const setLoading = (isLoading) => {
+            submit.disabled = isLoading;
+            input.disabled = isLoading;
+            status.textContent = isLoading ? 'TirtaAgent sedang menjawab...' : '';
+
+            if (typing) {
+                typing.classList.toggle('hidden', !isLoading);
+                typing.classList.toggle('flex', isLoading);
+                scrollToBottom();
+            }
+
+            sendIcon?.classList.toggle('hidden', isLoading);
+            sendSpinner?.classList.toggle('hidden', !isLoading);
+        };
+
+        const resetConversation = () => {
+            conversationId = null;
+            window.sessionStorage.removeItem('tirta_agent_conversation_id');
+            messages.querySelectorAll('[data-tirta-welcome] ~ div:not([data-tirta-typing])').forEach((message) => {
+                message.remove();
+            });
+            status.textContent = 'Percakapan baru siap.';
+            input.value = '';
+            autosizeInput();
+            input.focus();
+        };
+
+        form.addEventListener('submit', async (event) => {
+            event.preventDefault();
+            const message = input.value.trim();
+            if (!message) return;
+
+            addMessage(message, 'user');
+            input.value = '';
+            autosizeInput();
+            setLoading(true);
+
+            try {
+                const response = await fetch(chat.dataset.endpoint, {
+                    method: 'POST',
+                    headers: {
+                        'Accept': 'application/json',
+                        'Content-Type': 'application/json',
+                        'X-CSRF-TOKEN': chat.dataset.csrf,
+                    },
+                    body: JSON.stringify({
+                        message,
+                        conversation_id: conversationId,
+                    }),
+                });
+
+                const payload = await response.json();
+
+                if (!response.ok) {
+                    addMessage(payload.message ?? 'TirtaAgent belum bisa menjawab.', 'assistant');
+                    return;
+                }
+
+                conversationId = payload.conversation_id;
+
+                if (conversationId) {
+                    window.sessionStorage.setItem('tirta_agent_conversation_id', conversationId);
+                }
+
+                addMessage(payload.message, 'assistant');
+            } catch (error) {
+                addMessage(error.message, 'assistant');
+            } finally {
+                setLoading(false);
+                input.focus();
+            }
+        });
+
+        input.addEventListener('input', autosizeInput);
+
+        input.addEventListener('keydown', (event) => {
+            if (event.key === 'Enter' && !event.shiftKey) {
+                event.preventDefault();
+                form.requestSubmit();
+            }
+        });
+
+        promptButtons.forEach((button) => {
+            button.addEventListener('click', () => {
+                input.value = button.dataset.tirtaPrompt ?? '';
+                autosizeInput();
+                input.focus();
+            });
+        });
+
+        resetButtons.forEach((button) => {
+            button.addEventListener('click', resetConversation);
+        });
+
+        autosizeInput();
+    });
+}
+
+
+// init
+document.addEventListener('DOMContentLoaded', () => {
+    if (typeof window.initStatistikMahasiswaCharts === 'function') {
+        window.initStatistikMahasiswaCharts(Chart);
+    }
+
+    if (typeof window.initJumlahPeminatChart === 'function') {
+        window.initJumlahPeminatChart(Chart);
+    }
+
+    if (typeof window.initSebaranFakultasChart === 'function') {
+        window.initSebaranFakultasChart(Chart);
+    }
+
+    if (typeof window.initDosenFakultasChart === 'function') {
+        window.initDosenFakultasChart(Chart);
+    }
+
+    if (typeof window.initDosenStatusChart === 'function') {
+        window.initDosenStatusChart(Chart);
+    }
+
+    if (typeof window.initAsetComboStackedChart === 'function') {
+        window.initAsetComboStackedChart(Chart);
+    }
+
+    if (typeof window.initKondisiBarChart === 'function') {
+        window.initKondisiBarChart(Chart);
+    }
+
+    if (typeof window.initPegawaiCharts === 'function') {
+        window.initPegawaiCharts(Chart);
+    }
+
+    initMobileMenu();
+    initTirtaAgentDrawer();
+    initTirtaAgentChats();
+});

@@ -1,0 +1,497 @@
+@import "tailwindcss";
+
+@source "../../vendor/laravel/framework/src/Illuminate/Pagination/resources/views/*.blade.php";
+@source "../../storage/framework/views/*.php";
+@source "../**/*.blade.php";
+@source "../**/*.js";
+
+@theme {
+    --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "Instrument Sans", ui-sans-serif, system-ui, sans-serif,
+        "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol",
+        "Noto Color Emoji";
+    --color-apple-canvas: #F5F5F7;
+    --color-apple-ink: #1D1D1F;
+    --color-apple-secondary: #6E6E73;
+    --color-apple-accent: #0071E3;
+    --color-apple-accent-hover: #0077ED;
+    --color-green-400: #5BC26F;
+    --color-green-500: #30A64A;
+    --color-green-600: #24833A;
+    --color-gray-custom-400: #E5E5E5;
+    --color-gray-custom-500: #CCCCCC;
+    --color-gray-custom-600: #A6A6A6;
+    --color-cyan-custom-400: #4DB8CB;
+    --color-cyan-custom-500: #25A2B7;
+    --color-cyan-custom-600: #1D8595;
+    --color-blue-custom-400: #4A98FC;
+    --color-blue-custom-500: #0071E3;
+    --color-blue-custom-600: #005BB5;
+}
+
+@layer base {
+    body {
+        background-color: #F5F5F7;
+        color: #1D1D1F;
+        -webkit-font-smoothing: antialiased;
+        -moz-osx-font-smoothing: grayscale;
+    }
+
+    a:focus-visible,
+    button:focus-visible,
+    input:focus-visible,
+    select:focus-visible,
+    textarea:focus-visible {
+        outline: 2px solid #0071E3;
+        outline-offset: 2px;
+    }
+}
+
+.tabular-nums {
+    font-variant-numeric: tabular-nums;
+}
+
+/* Alpine.js x-cloak - hide elements until Alpine initializes */
+[x-cloak] {
+    display: none !important;
+}
+
+/* TirtaAgent Chat UI - Modern ChatGPT Style */
+.tirta-quick-prompts {
+    scrollbar-width: none;
+}
+
+.tirta-quick-prompts::-webkit-scrollbar {
+    display: none;
+}
+
+/* Custom Scrollbar for Message Container */
+.tirta-messages-scroll {
+    scrollbar-width: thin;
+    scrollbar-color: #cbd5e1 transparent;
+}
+
+.tirta-messages-scroll::-webkit-scrollbar {
+    width: 6px;
+}
+
+.tirta-messages-scroll::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.tirta-messages-scroll::-webkit-scrollbar-thumb {
+    background-color: #cbd5e1;
+    border-radius: 9999px;
+}
+
+.tirta-messages-scroll::-webkit-scrollbar-thumb:hover {
+    background-color: #94a3b8;
+}
+
+/* Typing Indicator Animation */
+.tirta-typing-dots {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+}
+
+.tirta-typing-dots span {
+    width: 0.45rem;
+    height: 0.45rem;
+    border-radius: 9999px;
+    background-color: #0ea5e9;
+    opacity: 0.4;
+    animation: tirtaTypingPulse 1.2s ease-in-out infinite;
+}
+
+.tirta-typing-dots span:nth-child(2) {
+    animation-delay: 0.2s;
+}
+
+.tirta-typing-dots span:nth-child(3) {
+    animation-delay: 0.4s;
+}
+
+@keyframes tirtaTypingPulse {
+
+    0%,
+    80%,
+    100% {
+        transform: translateY(0);
+        opacity: 0.4;
+    }
+
+    40% {
+        transform: translateY(-0.25rem);
+        opacity: 1;
+        background-color: #0284c7;
+    }
+}
+
+@keyframes tirtaFadeInUp {
+    from {
+        opacity: 0;
+        transform: translateY(8px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.animate-message-in {
+    animation: tirtaFadeInUp 0.25s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+/* TirtaAgent Chat Markdown Styling - Professional ChatGPT Style */
+.tirta-markdown-content {
+    color: #1e293b;
+    word-break: break-word;
+}
+
+.tirta-markdown-content p {
+    margin-bottom: 0.875rem;
+    line-height: 1.625;
+}
+
+.tirta-markdown-content p:last-child {
+    margin-bottom: 0;
+}
+
+.tirta-markdown-content h1,
+.tirta-markdown-content h2,
+.tirta-markdown-content h3,
+.tirta-markdown-content h4 {
+    font-weight: 700;
+    color: #0f172a;
+    margin-top: 1rem;
+    margin-bottom: 0.5rem;
+}
+
+.tirta-markdown-content h1 {
+    font-size: 1.25rem;
+}
+
+.tirta-markdown-content h2 {
+    font-size: 1.125rem;
+}
+
+.tirta-markdown-content h3 {
+    font-size: 1rem;
+}
+
+.tirta-markdown-content ul {
+    list-style-type: disc;
+    margin-left: 1.25rem;
+    margin-bottom: 0.875rem;
+}
+
+.tirta-markdown-content ol {
+    list-style-type: decimal;
+    margin-left: 1.25rem;
+    margin-bottom: 0.875rem;
+}
+
+.tirta-markdown-content li {
+    margin-bottom: 0.35rem;
+    line-height: 1.5;
+}
+
+.tirta-markdown-content li::marker {
+    color: #0284c7;
+}
+
+.tirta-markdown-content strong {
+    font-weight: 700;
+    color: #0f172a;
+}
+
+.tirta-markdown-content a {
+    color: #0284c7;
+    text-decoration: underline;
+    font-weight: 600;
+    transition: color 0.15s ease;
+}
+
+.tirta-markdown-content a:hover {
+    color: #0369a1;
+}
+
+/* ChatGPT Style Tables */
+.tirta-markdown-content .table-wrapper {
+    width: 100%;
+    overflow-x: auto;
+    margin-top: 0.875rem;
+    margin-bottom: 0.875rem;
+    border-radius: 0.75rem;
+    border: 1px solid #e2e8f0;
+    box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+}
+
+.tirta-markdown-content table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.8125rem;
+    line-height: 1.35rem;
+    background-color: #ffffff;
+}
+
+.tirta-markdown-content th {
+    background-color: #f8fafc;
+    border-bottom: 2px solid #e2e8f0;
+    padding: 0.625rem 0.875rem;
+    font-weight: 700;
+    text-align: left;
+    color: #334155;
+    text-transform: uppercase;
+    font-size: 0.7rem;
+    letter-spacing: 0.05em;
+}
+
+.tirta-markdown-content td {
+    border-bottom: 1px solid #f1f5f9;
+    padding: 0.625rem 0.875rem;
+    color: #475569;
+}
+
+.tirta-markdown-content tr:last-child td {
+    border-bottom: none;
+}
+
+.tirta-markdown-content tr:hover td {
+    background-color: #f8fafc;
+}
+
+/* Inline Code & Code Block Styling */
+.tirta-markdown-content code {
+    background-color: #f1f5f9;
+    padding: 0.15rem 0.35rem;
+    border-radius: 0.375rem;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    font-size: 0.85em;
+    color: #0284c7;
+    border: 1px solid #e2e8f0;
+}
+
+/* Code Block Wrapper with Header & Copy Button */
+.tirta-code-block {
+    margin-top: 0.875rem;
+    margin-bottom: 0.875rem;
+    border-radius: 0.75rem;
+    overflow: hidden;
+    background-color: #0f172a;
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+}
+
+.tirta-code-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.5rem 0.875rem;
+    background-color: #1e293b;
+    border-bottom: 1px solid #334155;
+    color: #94a3b8;
+    font-size: 0.75rem;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-weight: 600;
+}
+
+.tirta-code-header button {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0.2rem 0.5rem;
+    border-radius: 0.375rem;
+    background-color: transparent;
+    color: #cbd5e1;
+    font-size: 0.75rem;
+    transition: all 0.15s ease;
+    cursor: pointer;
+}
+
+.tirta-code-header button:hover {
+    background-color: #334155;
+    color: #ffffff;
+}
+
+.tirta-code-block pre {
+    margin: 0;
+    padding: 1rem;
+    overflow-x: auto;
+    background-color: #0f172a;
+    color: #f8fafc;
+}
+
+.tirta-code-block pre code {
+    background-color: transparent;
+    padding: 0;
+    border: none;
+    color: inherit;
+    font-size: 0.85rem;
+    line-height: 1.5;
+}
+
+.alert-info {
+    color: #1D1D1F;
+    background-color: #F5F5F7;
+    border-color: rgba(0, 0, 0, 0.06);
+}
+
+.alert {
+    position: relative;
+    padding: 0.75rem 1rem;
+    margin-bottom: 0.5rem;
+    border: 1px solid rgba(0, 0, 0, 0.06);
+    border-radius: 0.75rem;
+    font-size: 0.8125rem;
+    color: #6E6E73;
+}
+
+/* Hardware-accelerated smooth rotation animation for loading spinners */
+@keyframes satudataSpin {
+    from {
+        transform: rotate(0deg);
+    }
+
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+.spin-smooth {
+    animation: satudataSpin 0.85s linear infinite;
+    will-change: transform;
+}
+
+/* Sidebar Layout Utilities */
+.satudata-sidebar {
+    position: fixed;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    height: 100vh;
+    z-index: 40;
+    display: flex;
+    flex-direction: column;
+    background-color: #0f172a;
+    border-right: 1px solid #1e293b;
+    color: #f8fafc;
+    overflow: hidden;
+}
+
+@media (max-width: 1023px) {
+    .satudata-sidebar-desktop {
+        display: none !important;
+    }
+
+    .satudata-content-wrapper {
+        padding-left: 0 !important;
+    }
+}
+
+@media (min-width: 1024px) {
+    .satudata-sidebar-desktop {
+        display: none !important;
+    }
+
+    .satudata-content-wrapper {
+        padding-left: 0 !important;
+    }
+
+    /* Floating tooltip on hover only when collapsed */
+    html.sidebar-collapsed .satudata-sidebar-desktop a:hover .satudata-sidebar-tooltip,
+    html.sidebar-collapsed .satudata-sidebar-desktop button:hover .satudata-sidebar-tooltip {
+        display: flex !important;
+    }
+
+    html.sidebar-collapsed .satudata-collapse-icon {
+        transform: rotate(180deg);
+    }
+
+    /* Profile Dropdown Popover */
+    .satudata-profile-popover {
+        bottom: calc(100% + 0.5rem);
+        left: 0.75rem;
+        right: 0.75rem;
+    }
+
+    html.sidebar-collapsed .satudata-profile-popover {
+        bottom: 0.75rem;
+        left: calc(100% + 0.75rem);
+        right: auto;
+        width: 14rem;
+    }
+
+    html.sidebar-collapsed .satudata-sidebar-desktop {
+        overflow: visible !important;
+    }
+}
+
+/* Sidebar Text Labels Visibility & Transition */
+.satudata-sidebar-label {
+    overflow: hidden;
+    white-space: nowrap;
+    opacity: 1;
+}
+
+/* When collapsed: fade out label */
+html.sidebar-collapsed .satudata-sidebar-label {
+    opacity: 0 !important;
+    pointer-events: none;
+}
+
+/* Instant CSS state on page navigation (SSR / First Paint) - prevents ANY flash or glitch */
+html.sidebar-collapsed:not(.sidebar-animated) .satudata-sidebar-label {
+    display: none !important;
+}
+
+/* Transitions ONLY active during explicit user interaction */
+.sidebar-animated .satudata-sidebar-desktop {
+    transition: width 0.25s cubic-bezier(0.4, 0, 0.2, 1) !important;
+    overflow: hidden !important;
+}
+
+.sidebar-animated .satudata-content-wrapper {
+    transition: padding-left 0.25s cubic-bezier(0.4, 0, 0.2, 1) !important;
+}
+
+.sidebar-animated .satudata-sidebar-label {
+    transition: opacity 0.18s ease-in-out !important;
+}
+
+.sidebar-animated .satudata-collapse-icon {
+    transition: transform 0.25s ease !important;
+}
+
+/* Skeleton Loading Shimmer Effect */
+@keyframes skeleton-shimmer {
+    0% {
+        transform: translateX(-100%);
+    }
+
+    100% {
+        transform: translateX(100%);
+    }
+}
+
+.skeleton-shimmer {
+    position: relative;
+    overflow: hidden;
+    background-color: #f1f5f9;
+}
+
+.skeleton-shimmer::after {
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    transform: translateX(-100%);
+    background-image: linear-gradient(90deg,
+            rgba(255, 255, 255, 0) 0%,
+            rgba(255, 255, 255, 0.65) 40%,
+            rgba(255, 255, 255, 0.85) 60%,
+            rgba(255, 255, 255, 0) 100%);
+    animation: skeleton-shimmer 1.4s infinite cubic-bezier(0.4, 0, 0.2, 1);
+    content: '';
+}
